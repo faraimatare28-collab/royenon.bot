@@ -1,0 +1,14 @@
+services:
+  - type: web
+    name: royeno-solartech-bot
+    env: node
+    plan: free
+    buildCommand: npm install
+    startCommand: npm start
+    envVars:
+      - key: GROQ_API_KEY
+        sync: false
+      - key: GREEN_API_INSTANCE_ID
+        sync: false
+      - key: GREEN_API_TOKEN
+        sync: false
