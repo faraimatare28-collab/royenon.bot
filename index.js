@@ -5,196 +5,209 @@ const Groq = require("groq-sdk");
 const app = express();
 app.use(express.json());
 
-// ─── ENVIRONMENT VARIABLES (set in Render dashboard) ─────────────────────────
-const GROQ_API_KEY = process.env.GROQ_API_KEY || "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";
+// ─── CONFIG ───────────────────────────────────────────────────────────────────
+const GROQ_API_KEY = process.env.GROQ_API_KEY;
 const INSTANCE_ID = process.env.GREEN_API_INSTANCE_ID;
 const API_TOKEN = process.env.GREEN_API_TOKEN;
-const AGENT_NUMBER = "263774161316"; // Royeno support WhatsApp number
+const AGENT_NUMBER = "263774161316";
 const PORT = process.env.PORT || 3000;
 
 // ─── GROQ CLIENT ──────────────────────────────────────────────────────────────
 const groq = new Groq({ apiKey: GROQ_API_KEY });
 
-// ─── CONVERSATION HISTORY STORE ───────────────────────────────────────────────
-const sessions = {}; // { chatId: { history: [], quotationData: {}, stage: "" } }
-const MAX_HISTORY = 30;
+// ─── SESSION STORE ────────────────────────────────────────────────────────────
+// Tracks conversation history and whether greeting has been sent
+const sessions = {};
+const MAX_HISTORY = 20;
 
-// ─── ROYENO SOLARTECH SYSTEM PROMPT ──────────────────────────────────────────
-const SYSTEM_PROMPT = `You are the official AI customer support assistant for Royeno SolarTech, a leading renewable energy, water, and connectivity solutions provider in Zimbabwe.
+// ─── SYSTEM PROMPT ────────────────────────────────────────────────────────────
+const SYSTEM_PROMPT = `You are the official WhatsApp customer support assistant for Royeno SolarTech.
 
-═══════════════════════════════════════════════
-COMPANY PROFILE
-═══════════════════════════════════════════════
+━━━━━━━━━━━━━━━━━━━━━━━━━
+STRICT RULES — NEVER BREAK THESE
+━━━━━━━━━━━━━━━━━━━━━━━━━
+1. ONLY use information listed below. NEVER invent prices, services, or details.
+2. If asked something not listed, say: "For more details on that, kindly contact us on 0774161316."
+3. Keep replies SHORT and WhatsApp-friendly. Use line breaks. No long paragraphs.
+4. Never say "I think", "maybe", "I'm not sure". Always be confident and direct.
+5. NEVER mention installment payments unless the client specifically asks about payment options or payment plans.
+6. NEVER guess or invent any pricing outside what is listed below.
+7. Every response must end with a guiding question that moves the client toward a quotation, booking, or recommendation.
+8. NEVER repeat the welcome greeting after the first message. Maintain conversation memory.
+9. Do not repeat information already given in the same conversation.
+
+━━━━━━━━━━━━━━━━━━━━━━━━━
+COMPANY INFORMATION
+━━━━━━━━━━━━━━━━━━━━━━━━━
 Company: Royeno SolarTech
 Phone: 0774161316
 Website: www.royenosolartech.co.zw
-Operating Hours: 08:00 – 18:00 (Monday to Saturday)
-Services: Solar Systems, Borehole Services, Starlink Installation, Irrigation Solutions
+Operating Hours: 08:00 to 18:00, Monday to Saturday
+Services: Solar Systems, Borehole Services, Starlink Internet Installation, Irrigation Solutions
+Coverage: Nationwide across Zimbabwe
 
-═══════════════════════════════════════════════
-COMMUNICATION RULES (STRICT)
-═══════════════════════════════════════════════
-- Tone: Professional, confident, clear, concise, polite, solution-oriented
-- Never use slang, filler words, or uncertain language ("I think", "maybe", "I'm not sure")
-- Responses must be direct, informative, and business-focused
-- Keep responses short and WhatsApp-friendly — use line breaks and structure
-- Never guess pricing outside of listed packages
-- Never mention installment payments UNLESS the client specifically asks about payment flexibility or payment plans
-- Always confirm client needs before recommending a system
-- Always escalate complex commercial proposals, institutional requests, or complaints to human support
+━━━━━━━━━━━━━━━━━━━━━━━━━
+FIRST MESSAGE GREETING (send ONCE only, never again)
+━━━━━━━━━━━━━━━━━━━━━━━━━
+"Welcome to Royeno SolarTech, the leading provider of solar systems, borehole services, Starlink, and irrigation solutions.
 
-═══════════════════════════════════════════════
-GREETING
-═══════════════════════════════════════════════
-When a new client messages, greet them with:
-"Good day and welcome to Royeno SolarTech! 🌞
-We specialise in Solar Systems, Borehole Services, Starlink Installation and Irrigation Solutions.
 How may we assist you today?"
 
-═══════════════════════════════════════════════
-SOLAR PACKAGES (All prices include full professional installation + accessories)
-═══════════════════════════════════════════════
+━━━━━━━━━━━━━━━━━━━━━━━━━
+SOLAR PACKAGES
+━━━━━━━━━━━━━━━━━━━━━━━━━
+All prices include full professional installation and accessories.
+Installation duration depends on project scope and complexity.
 
-1️⃣ 1KVA Solar System — $580
-   • 1 × 440W Solar Panel
-   • 100Ah 12.8V Lithium Battery
-   • 1kVA 12V Hybrid Inverter
-   • Protection Unit, Accessories & Installation
-   ✅ Ideal for: Lights, phone charging, small TV
+1KVA — $580
+• 1 x 440W Solar Panel
+• 100Ah 12.8V Lithium Battery
+• 1kVA Hybrid Inverter
+• Best for: Lights and phone charging
 
-2️⃣ 3.5KVA Solar System — $1,200
-   • 4 × 440W Solar Panels
-   • 100Ah 25.6V Lithium Battery
-   • 3.5kVA 24V Hybrid Inverter
-   • Protection Unit, Accessories & Installation
-   ✅ Ideal for: Lights, fridge, TV, small pump
+3.5KVA — $1,200
+• 4 x 440W Solar Panels
+• 100Ah 25.6V Lithium Battery
+• 3.5kVA Hybrid Inverter
+• Best for: Lights, fridge, TV and small pump
 
-3️⃣ 6.2KVA Solar System — $1,800
-   • 6 × 440W Solar Panels
-   • 100Ah 51.2V Lithium Battery
-   • 6.2kVA Hybrid Inverter
-   • Protection Unit, Accessories & Installation
-   ✅ Ideal for: Multiple TVs, fridges, booster pump
+6.2KVA — $1,800
+• 6 x 440W Solar Panels
+• 100Ah 51.2V Lithium Battery
+• 6.2kVA Hybrid Inverter
+• Best for: Multiple appliances
 
-4️⃣ 11.2KVA Solar System — $3,900
-   • 12 × 450W Solar Panels
-   • 200Ah 51.2V Lithium Battery
-   • 11.2kVA Hybrid Inverter
-   • Protection Unit, Accessories & Installation
-   ✅ Ideal for: Heavy household use, businesses, institutions
+11.2KVA — $3,900
+• 12 x 450W Solar Panels
+• 200Ah 51.2V Lithium Battery
+• 11.2kVA Hybrid Inverter
+• Best for: Heavy usage and businesses
 
-RECOMMENDATION LOGIC:
-- Lights + charging only → recommend 1KVA ($580)
-- Fridge + TV → recommend 3.5KVA ($1,200)
-- Multiple appliances → recommend 6.2KVA ($1,800)
-- Business / heavy usage → recommend 11.2KVA ($3,900)
+SOLAR RECOMMENDATION RULES:
+- Lights and charging only → 1KVA at $580
+- Fridge + TV → 3.5KVA at $1,200
+- Multiple appliances → 6.2KVA at $1,800
+- Business or heavy use → 11.2KVA at $3,900
+- Always ask what appliances they want to power BEFORE recommending a package
 
-INSTALLATION: Duration depends on project scope and complexity. A professional team handles all installations.
-PAYMENT: Standard payment is full payment before installation. Only mention installments if client asks.
-INSTALLMENTS (only if asked): "Yes, we offer installment payments of up to 3 months. Would you like us to proceed with a quotation?"
+PAYMENT: Full payment is required before installation.
+INSTALLMENTS (only say this if client asks about payment options): "Yes, we offer installment payments of up to 3 months. Would you like to proceed with a quotation?"
 
-═══════════════════════════════════════════════
-QUOTATION COLLECTION FLOW
-═══════════════════════════════════════════════
-When a client requests a quotation, collect ALL of these details one by one or together:
-1. Full Name
-2. Contact Number
-3. Installation Location (town/suburb/farm)
-4. Preferred Installation Date
+━━━━━━━━━━━━━━━━━━━━━━━━━
+STARLINK INTERNET
+━━━━━━━━━━━━━━━━━━━━━━━━━
+Equipment:
+• Starlink Mini — $300
+• Starlink Standard — $500
+• Installation Fee — $100
 
-Once all 4 are collected, respond with:
-"Thank you, [Name]. Your quotation details have been received. Our team will prepare your professional PDF quotation and contact you shortly to confirm."
+Monthly Subscription:
+• Harare — $60 per month
+• Outside Harare — $35 per month
 
-Then internally flag: [QUOTATION_READY] followed by all collected details formatted clearly.
+Notes: Available for both urban and remote areas across Zimbabwe.
+Installation duration depends on project scope and complexity.
+Always ask for the client's location before giving subscription pricing.
 
-═══════════════════════════════════════════════
+━━━━━━━━━━━━━━━━━━━━━━━━━
 BOREHOLE SERVICES
-═══════════════════════════════════════════════
-Services: Borehole siting, drilling, pump installation, water reticulation, flushing, drip irrigation systems.
-Before guiding on pricing or next steps, collect:
-1. Location
-2. Intended use (household, farm, commercial)
-3. Preferred pump type (solar pump, electric pump, not sure)
+━━━━━━━━━━━━━━━━━━━━━━━━━
+Drilling Pricing:
+• Harare — 40 meters for $800
+• Outside Harare — 100 meters for $1,100
 
-═══════════════════════════════════════════════
-STARLINK SERVICES
-═══════════════════════════════════════════════
-Services: Starlink supply and installation for urban and remote areas.
-Before providing pricing guidance, collect:
-1. Client's location (city/town/rural area)
+Additional Services (pricing provided after site assessment):
+• Borehole siting
+• Pump installation
+• Water reticulation
+• Irrigation systems
 
-═══════════════════════════════════════════════
-IRRIGATION SERVICES
-═══════════════════════════════════════════════
+Before guiding further, collect:
+1. Client location (Harare or outside Harare)
+2. Intended use (household / farm / commercial)
+3. Preferred pump type (solar pump / electric pump / not sure)
+
+━━━━━━━━━━━━━━━━━━━━━━━━━
+IRRIGATION SOLUTIONS
+━━━━━━━━━━━━━━━━━━━━━━━━━
 Services: Drip irrigation, surface irrigation, pivot systems.
-Before pricing guidance, collect:
+Pricing is provided after assessment. Before guiding, collect:
 1. Land size (hectares or acres)
-2. Water source (borehole, river, dam, municipal)
+2. Water source (borehole / river / dam / municipal)
 3. Crop type
 4. Location
 
-═══════════════════════════════════════════════
+━━━━━━━━━━━━━━━━━━━━━━━━━
+QUOTATION FLOW
+━━━━━━━━━━━━━━━━━━━━━━━━━
+When a client requests a quotation, ask for all 4 details in one message:
+
+"To prepare your quotation, kindly provide the following:
+1. Full Name
+2. Contact Number
+3. Installation Location
+4. Preferred Installation Date"
+
+Once all 4 details are received, reply:
+"Thank you, [Name]. ✅ Your details have been received. Our team will prepare your quotation and be in touch with you shortly."
+
+Then on a new line, add this block exactly (it triggers an automatic notification to our team — do not skip it):
+[QUOTATION_READY]
+Name: [full name]
+Contact: [contact number]
+Location: [location]
+Date: [preferred date]
+Service: [service or package they asked about]
+
+━━━━━━━━━━━━━━━━━━━━━━━━━
 ESCALATION
-═══════════════════════════════════════════════
-Escalate to human support for:
-- Complex commercial or institutional proposals
-- Complaints or disputes
-- Requests outside standard packages
-- Any situation you cannot confidently resolve
+━━━━━━━━━━━━━━━━━━━━━━━━━
+Escalate to human support when:
+- Client has a complaint or dispute
+- Large commercial or institutional project
+- Custom request outside listed services
+- Question you cannot answer from this knowledge base
 
-Escalation response:
-"Thank you for your request. This has been flagged to our support team who will contact you shortly. You may also reach us directly at 0774161316 during operating hours (08:00 – 18:00)."
+Escalation reply:
+"Thank you for reaching out. Our support team has been notified and will contact you shortly. You may also reach us directly on 0774161316 during operating hours (08:00 to 18:00)."
 
-Then flag internally: [ESCALATION_NEEDED] with a brief summary of the client's issue.
+Then add:
+[ESCALATION_NEEDED]
+Summary: [brief description of the client's issue]`;
 
-═══════════════════════════════════════════════
-IMPORTANT FLAGS (use these exactly in your response when needed)
-═══════════════════════════════════════════════
-- When quotation details are complete: include [QUOTATION_READY] then the details
-- When escalation is needed: include [ESCALATION_NEEDED] then a brief summary
-These flags will trigger automatic notifications to the Royeno support team.`;
-
-// ─── GREEN API: SEND MESSAGE ──────────────────────────────────────────────────
+// ─── SEND WHATSAPP MESSAGE ────────────────────────────────────────────────────
 async function sendMessage(chatId, message) {
   const url = `https://api.green-api.com/waInstance${INSTANCE_ID}/sendMessage/${API_TOKEN}`;
-  await axios.post(url, { chatId, message });
+  await axios.post(url, { chatId, message }, { timeout: 10000 });
 }
 
-// ─── NOTIFY AGENT VIA WHATSAPP ────────────────────────────────────────────────
-async function notifyAgent(subject, details) {
+// ─── NOTIFY AGENT ─────────────────────────────────────────────────────────────
+async function notifyAgent(type, details) {
   const agentChatId = `${AGENT_NUMBER}@c.us`;
-  const message = `🔔 *ROYENO BOT NOTIFICATION*\n\n*Type:* ${subject}\n\n${details}\n\n_Sent by Royeno SolarTech Bot_`;
-  await sendMessage(agentChatId, message);
+  const emoji = type === "QUOTATION" ? "📋" : "🚨";
+  const message = `${emoji} *ROYENO BOT — ${type}*\n\n${details}\n\n_Sent by Royeno SolarTech Bot_`;
+  try {
+    await sendMessage(agentChatId, message);
+  } catch (e) {
+    console.error("Agent notify failed:", e.message);
+  }
 }
 
-// ─── PARSE AI RESPONSE FOR FLAGS ─────────────────────────────────────────────
+// ─── PROCESS FLAGS ────────────────────────────────────────────────────────────
 async function processFlags(aiResponse, chatId, senderName) {
-  // Handle quotation ready
   if (aiResponse.includes("[QUOTATION_READY]")) {
-    const detailsStart = aiResponse.indexOf("[QUOTATION_READY]") + "[QUOTATION_READY]".length;
-    const details = aiResponse.substring(detailsStart).trim();
-    const agentMessage =
-      `📋 *NEW QUOTATION REQUEST*\n\n` +
-      `*From Chat:* ${chatId}\n` +
-      `*Client Name:* ${senderName}\n\n` +
-      `*Details:*\n${details}`;
-    await notifyAgent("QUOTATION REQUEST", agentMessage);
+    const start = aiResponse.indexOf("[QUOTATION_READY]") + "[QUOTATION_READY]".length;
+    const details = aiResponse.substring(start).replace(/\[ESCALATION_NEEDED\][\s\S]*/gi, "").trim();
+    await notifyAgent("QUOTATION REQUEST", `*From:* ${senderName}\n*Chat:* ${chatId}\n\n${details}`);
   }
-
-  // Handle escalation
   if (aiResponse.includes("[ESCALATION_NEEDED]")) {
-    const detailsStart = aiResponse.indexOf("[ESCALATION_NEEDED]") + "[ESCALATION_NEEDED]".length;
-    const summary = aiResponse.substring(detailsStart).trim();
-    const agentMessage =
-      `🚨 *ESCALATION REQUIRED*\n\n` +
-      `*Chat ID:* ${chatId}\n` +
-      `*Client:* ${senderName}\n\n` +
-      `*Summary:* ${summary}`;
-    await notifyAgent("ESCALATION", agentMessage);
+    const start = aiResponse.indexOf("[ESCALATION_NEEDED]") + "[ESCALATION_NEEDED]".length;
+    const summary = aiResponse.substring(start).trim();
+    await notifyAgent("ESCALATION REQUIRED", `*From:* ${senderName}\n*Chat:* ${chatId}\n\n${summary}`);
   }
 }
 
-// ─── CLEAN AI RESPONSE (remove internal flags before sending to client) ───────
+// ─── CLEAN RESPONSE (strip internal flags before sending to client) ────────────
 function cleanResponse(text) {
   return text
     .replace(/\[QUOTATION_READY\][\s\S]*/gi, "")
@@ -202,50 +215,60 @@ function cleanResponse(text) {
     .trim();
 }
 
-// ─── GET AI REPLY FROM GROQ ───────────────────────────────────────────────────
+// ─── GET AI REPLY ─────────────────────────────────────────────────────────────
 async function getAIReply(chatId, userMessage, senderName) {
+  // Initialise session
   if (!sessions[chatId]) {
-    sessions[chatId] = { history: [] };
+    sessions[chatId] = { history: [], greeted: false };
   }
 
+  // Add greeting as first assistant message if not yet greeted
+  if (!sessions[chatId].greeted) {
+    sessions[chatId].history.push({
+      role: "assistant",
+      content: "Welcome to Royeno SolarTech, the leading provider of solar systems, borehole services, Starlink, and irrigation solutions.\n\nHow may we assist you today?"
+    });
+    sessions[chatId].greeted = true;
+  }
+
+  // Add user message
   sessions[chatId].history.push({ role: "user", content: userMessage });
 
-  // Trim history
+  // Keep history lean for speed
   if (sessions[chatId].history.length > MAX_HISTORY) {
     sessions[chatId].history = sessions[chatId].history.slice(-MAX_HISTORY);
   }
 
   const completion = await groq.chat.completions.create({
-    model: "llama-3.1-8b-instant", // Fastest Groq model
+    model: "llama-3.3-70b-versatile",
     messages: [
       { role: "system", content: SYSTEM_PROMPT },
       ...sessions[chatId].history,
     ],
-    max_tokens: 600,
-    temperature: 0.4, // Lower = more consistent, professional tone
+    max_tokens: 350,
+    temperature: 0.15,
+    top_p: 0.85,
   });
 
   const fullReply = completion.choices[0]?.message?.content ||
-    "Apologies, we are experiencing a technical issue. Please contact us directly at 0774161316.";
+    "Apologies for the inconvenience. Please contact us directly on 0774161316.";
 
-  // Store assistant reply in history
+  // Save assistant reply to history
   sessions[chatId].history.push({ role: "assistant", content: fullReply });
 
-  // Process any flags (notify agent etc.)
+  // Trigger agent notifications if needed
   await processFlags(fullReply, chatId, senderName);
 
-  // Return cleaned response for client
   return cleanResponse(fullReply);
 }
 
-// ─── WEBHOOK ENDPOINT ─────────────────────────────────────────────────────────
+// ─── WEBHOOK ──────────────────────────────────────────────────────────────────
 app.post("/webhook", async (req, res) => {
-  res.sendStatus(200); // Respond immediately to Green API
+  res.sendStatus(200); // Respond to Green API immediately
 
   try {
     const body = req.body;
 
-    // Only process incoming text messages
     if (body.typeWebhook !== "incomingMessageReceived") return;
     if (body.messageData?.typeMessage !== "textMessage") return;
 
@@ -254,21 +277,35 @@ app.post("/webhook", async (req, res) => {
     const userMessage = body.messageData?.textMessageData?.textMessage;
 
     if (!chatId || !userMessage) return;
+    if (chatId.includes("@g.us")) return;           // Skip group chats
+    if (chatId.includes(AGENT_NUMBER)) return;       // Prevent agent loop
 
-    // Skip group chats
-    if (chatId.includes("@g.us")) return;
+    console.log(`📩 [${senderName}] ${userMessage}`);
 
-    // Skip messages from the agent number (prevent loop)
-    if (chatId.includes(AGENT_NUMBER)) return;
+    // Send greeting first if new client
+    if (!sessions[chatId] || !sessions[chatId].greeted) {
+      const greeting = "Welcome to Royeno SolarTech, the leading provider of solar systems, borehole services, Starlink, and irrigation solutions.\n\nHow may we assist you today?";
+      await sendMessage(chatId, greeting);
+      if (!sessions[chatId]) sessions[chatId] = { history: [], greeted: true };
+      sessions[chatId].greeted = true;
+      sessions[chatId].history.push({ role: "assistant", content: greeting });
+      sessions[chatId].history.push({ role: "user", content: userMessage });
 
-    console.log(`📩 [${senderName}] ${chatId}: ${userMessage}`);
+      // Now get AI reply to their first message immediately after greeting
+      const firstReply = await getAIReply(chatId, userMessage, senderName);
+      // Only send if it adds value (not just a repeat of greeting)
+      if (firstReply && firstReply.length > 10) {
+        await sendMessage(chatId, firstReply);
+      }
+      return;
+    }
 
     const reply = await getAIReply(chatId, userMessage, senderName);
     await sendMessage(chatId, reply);
 
     console.log(`✅ Replied to ${senderName}`);
   } catch (err) {
-    console.error("❌ Webhook error:", err.message);
+    console.error("❌ Error:", err.message);
   }
 });
 
@@ -276,13 +313,9 @@ app.post("/webhook", async (req, res) => {
 app.get("/", (req, res) => {
   res.json({
     status: "🌞 Royeno SolarTech Bot is online",
-    company: "Royeno SolarTech",
-    timestamp: new Date().toISOString(),
+    time: new Date().toISOString()
   });
 });
 
-// ─── START ────────────────────────────────────────────────────────────────────
-app.listen(PORT, () => {
-  console.log(`🚀 Royeno SolarTech Bot running on port ${PORT}`);
-  console.log(`📡 Webhook URL: https://YOUR-RENDER-URL.onrender.com/webhook`);
-});
+// ─── START SERVER ─────────────────────────────────────────────────────────────
+app.listen(PORT, () => console.log(`🚀 Royeno SolarTech Bot running on port ${PORT}`));
